@@ -32,6 +32,14 @@ export const signInUrl = (provider, returnTo = location.pathname + location.hash
 export const devSignIn = (email) => request('/auth/dev', { method: 'POST', body: JSON.stringify({ email }) })
 export const signOut = () => request('/auth/logout', { method: 'POST' })
 
+export const listProjects = () => request('/api/projects')
+export const createProject = (name, workspace) =>
+  request('/api/projects', { method: 'POST', body: JSON.stringify({ name, workspace }) })
+export const loadProject = (id) => request(`/api/projects/${id}`)
+export const saveProject = (id, payload) =>
+  request(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+export const deleteProject = (id) => request(`/api/projects/${id}`, { method: 'DELETE' })
+
 export const listShares = () => request('/api/shares')
 export const createShare = (payload) => request('/api/shares', { method: 'POST', body: JSON.stringify(payload) })
 export const updateShare = (slug, payload) =>

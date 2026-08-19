@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { authProviders, loadShare, signInUrl, signOut } from './lib/api.js'
+import { authProviders, devSignIn, loadShare, signInUrl, signOut } from './lib/api.js'
 import { buildBundle, ensureCompiler } from './lib/compile.js'
 import { buildPreviewHtml } from './lib/buildPreview.js'
 import { encodeWorkspace } from './lib/share.js'
@@ -209,7 +209,6 @@ function DevSignIn() {
         <button
           className="btn tiny"
           onClick={async () => {
-            const { devSignIn } = await import('./lib/api.js')
             await devSignIn(email)
             location.reload()
           }}

@@ -36,9 +36,22 @@ async function open() {
       UNIQUE (provider, provider_id)
     );
 
+    CREATE TABLE IF NOT EXISTS preview_projects (
+      id         TEXT PRIMARY KEY,
+      owner_id   TEXT NOT NULL REFERENCES preview_users(id),
+      name       TEXT NOT NULL DEFAULT 'Untitled project',
+      workspace  TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS preview_projects_owner_idx
+      ON preview_projects (owner_id, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS preview_shares (
       slug         TEXT PRIMARY KEY,
       owner_id     TEXT NOT NULL REFERENCES preview_users(id),
+      project_id   TEXT,
       title        TEXT NOT NULL,
       visibility   TEXT NOT NULL DEFAULT 'invite',
       workspace    TEXT NOT NULL,
@@ -59,12 +72,23 @@ async function open() {
   return db
 }
 
+const shapeProject = (row) =>
+  row && {
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    workspace: JSON.parse(row.workspace),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+
 const shape = (row, invites) => ({
   slug: row.slug,
   ownerId: row.owner_id,
   title: row.title,
   visibility: row.visibility,
   workspace: JSON.parse(row.workspace),
+  projectId: row.project_id || null,
   previewHtml: row.preview_html,
   views: row.views,
   createdAt: row.created_at,
@@ -107,17 +131,64 @@ export const sqliteStore = {
     },
   },
 
+  projects: {
+    async create({ ownerId, name, workspace }) {
+      const handle = await open()
+      const id = crypto.randomUUID()
+      const now = Date.now()
+      handle
+        .prepare(
+          'INSERT INTO preview_projects (id, owner_id, name, workspace, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+        )
+        .run(id, ownerId, name, JSON.stringify(workspace), now, now)
+      return sqliteStore.projects.byId(id)
+    },
+
+    async update(id, { name, workspace }) {
+      const handle = await open()
+      const current = await sqliteStore.projects.byId(id)
+      if (!current) return null
+      handle
+        .prepare('UPDATE preview_projects SET name = ?, workspace = ?, updated_at = ? WHERE id = ?')
+        .run(
+          name ?? current.name,
+          JSON.stringify(workspace ?? current.workspace),
+          Date.now(),
+          id
+        )
+      return sqliteStore.projects.byId(id)
+    },
+
+    async byId(id) {
+      const handle = await open()
+      return shapeProject(handle.prepare('SELECT * FROM preview_projects WHERE id = ?').get(id)) || null
+    },
+
+    async listByOwner(ownerId) {
+      const handle = await open()
+      return handle
+        .prepare('SELECT * FROM preview_projects WHERE owner_id = ? ORDER BY updated_at DESC')
+        .all(ownerId)
+        .map(shapeProject)
+    },
+
+    async remove(id) {
+      const handle = await open()
+      return handle.prepare('DELETE FROM preview_projects WHERE id = ?').run(id).changes > 0
+    },
+  },
+
   shares: {
-    async create({ ownerId, title, workspace, previewHtml, visibility, invites }) {
+    async create({ ownerId, title, workspace, previewHtml, visibility, invites, projectId }) {
       const handle = await open()
       const slug = newSlug()
       const now = Date.now()
       handle
         .prepare(
-          `INSERT INTO preview_shares (slug, owner_id, title, visibility, workspace, preview_html, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO preview_shares (slug, owner_id, project_id, title, visibility, workspace, preview_html, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(slug, ownerId, title, visibility, JSON.stringify(workspace), previewHtml || null, now, now)
+        .run(slug, ownerId, projectId || null, title, visibility, JSON.stringify(workspace), previewHtml || null, now, now)
       await sqliteStore.shares.setInvites(slug, invites)
       return sqliteStore.shares.bySlug(slug)
     },

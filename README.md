@@ -4,6 +4,9 @@ Drop a component file in, see it render. Anything it imports from npm shows up i
 dependency list you can install with one click — including Tailwind, which is detected
 from the markup itself so a design renders the way it was drawn.
 
+Sign in with Google or GitHub first: uploads are saved to your account as **projects**, and each
+preview can be published as a link that is either public or limited to people you invite.
+
 ```bash
 npm install
 npm run dev       # editor only          → http://localhost:5173
@@ -19,6 +22,7 @@ Nothing is written to disk and there is no bundler step at runtime:
 
 | Stage | What happens |
 | --- | --- |
+| Sign in | Google or GitHub. Without a reachable share server the editor falls back to browser-only storage and says so. |
 | Upload | Files are read in the browser (drag a file, several files, or a folder). |
 | Detect | `src/lib/detect.js` scans imports for npm packages and scores the markup for Tailwind utility classes. |
 | Install | `src/lib/registry.js` resolves the version against the npm registry and pins it into an import map served by esm.sh. Tailwind instead injects its browser compiler. |
@@ -44,6 +48,14 @@ shown in the console panel.
 
 **Open ↗** in the preview bar opens the built preview as its own browser tab (if the browser
 blocks it, the bar says so — allow pop-ups and click again).
+
+### Projects
+
+Everything you upload autosaves to the signed-in account — the **project menu** in the header lists
+your workspaces with their file counts, and lets you open, rename, delete or start a new one. A
+project holds its files, entry point, installed packages and React version, so reopening it puts
+the editor back exactly where you left it. Projects are private to their owner: another account
+gets `403`, and a signed-out request gets `401`.
 
 **Share** in the header offers two ways out of this machine:
 
@@ -141,8 +153,8 @@ npm run db:verify              # confirm the objects exist and the key can use t
 `supabase/preflight.sql` is a separate read-only script for the SQL editor: it reports whether any
 of the names the migration wants are already taken, and creates nothing.
 
-The migration creates `preview_users`, `preview_shares`, `preview_share_invites`,
-`preview_increment_share_views()`, and turns **RLS on with no policies** — the anon key can read
+The migrations create `preview_users`, `preview_projects`, `preview_shares`,
+`preview_share_invites`, `preview_increment_share_views()`, and turn **RLS on with no policies** — the anon key can read
 nothing even if it leaks, because only the service role (this server) ever touches those tables.
 
 Two things to know when the project is shared with another app:

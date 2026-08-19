@@ -395,7 +395,12 @@ select.field { padding: 6px 8px; }
   cursor: default;
 }
 
+.popover.align-left { right: auto; left: 0; }
+
 .popover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 14px 8px;
   font-size: 11px;
   font-weight: 650;
@@ -459,3 +464,56 @@ select.field { padding: 6px 8px; }
   color: #fca5a5;
   font-size: 12.5px;
 }
+
+/* ---------- sign-in gate ---------- */
+
+.gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  background:
+    radial-gradient(900px 500px at 50% -10%, rgba(59, 130, 246, 0.14), transparent 70%),
+    var(--bg);
+}
+
+.gate-card {
+  width: 100%;
+  max-width: 460px;
+  padding: 30px 32px 26px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+
+.gate-card h1 { font-size: 21px; margin: 0 0 8px; letter-spacing: -0.02em; }
+.gate-card > p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.65; }
+.gate-actions { display: flex; flex-direction: column; gap: 8px; margin: 22px 0 0; }
+.gate-btn { justify-content: center; padding: 10px 14px; text-decoration: none; font-size: 14px; }
+.gate-dev { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.gate-dev p { margin: 0 0 8px; font-size: 12px; color: var(--dim); }
+.gate-offline { margin-top: 14px; width: 100%; justify-content: center; font-size: 12.5px; }
+
+/* ---------- account + projects ---------- */
+
+.account-email {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-item.current { background: #14202f; border-radius: 8px; }
+.share-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.share-item-main:hover .share-item-title { color: var(--accent); }

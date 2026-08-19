@@ -6,7 +6,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import express from 'express'
 import { config, describeConfig } from './config.js'
-import { describeStore, shares } from './store/index.js'
+import { describeStore, projects, shares } from './store/index.js'
 import { currentUser, mountAuth, publicUser, requireUser } from './auth.js'
 
 const app = express()
@@ -46,6 +46,15 @@ function readWorkspace(body) {
 const readVisibility = (value) => (value === 'public' ? 'public' : 'invite')
 const readInvites = (value) => (Array.isArray(value) ? value.slice(0, 200).map(String) : [])
 
+const projectView = (project) => ({
+  id: project.id,
+  name: project.name,
+  fileCount: project.workspace.files.length,
+  entryName: project.workspace.entryName,
+  installed: project.workspace.installed || [],
+  updatedAt: project.updatedAt,
+})
+
 const ownerView = (share) => ({
   slug: share.slug,
   title: share.title,
@@ -53,6 +62,7 @@ const ownerView = (share) => ({
   invites: share.invites,
   views: share.views,
   updatedAt: share.updatedAt,
+  projectId: share.projectId || null,
   url: `${config.appOrigin}/s/${share.slug}`,
   fileCount: share.workspace.files.length,
 })
@@ -68,6 +78,73 @@ app.get('/api/me', async (req, res, next) => {
   }
 })
 
+// --- projects: a signed-in user's own workspaces ---------------------------
+
+app.get('/api/projects', requireUser, async (req, res, next) => {
+  try {
+    res.json({ projects: (await projects.listByOwner(req.user.id)).map(projectView) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+app.post('/api/projects', requireUser, async (req, res, next) => {
+  try {
+    const project = await projects.create({
+      ownerId: req.user.id,
+      name: String(req.body.name || 'Untitled project').slice(0, 120),
+      workspace: readWorkspace(req.body),
+    })
+    res.status(201).json({ project: projectView(project), workspace: project.workspace })
+  } catch (err) {
+    if (/required|limit|needs a name/.test(err.message)) return res.status(400).json({ error: err.message })
+    next(err)
+  }
+})
+
+/** Full workspace for one project — the editor loads from this. */
+app.get('/api/projects/:id', requireUser, async (req, res, next) => {
+  try {
+    const project = await projects.byId(req.params.id)
+    if (!project) return res.status(404).json({ error: 'not found' })
+    if (project.ownerId !== req.user.id) return res.status(403).json({ error: 'not your project' })
+    res.json({ project: projectView(project), workspace: project.workspace })
+  } catch (err) {
+    next(err)
+  }
+})
+
+app.patch('/api/projects/:id', requireUser, async (req, res, next) => {
+  try {
+    const project = await projects.byId(req.params.id)
+    if (!project) return res.status(404).json({ error: 'not found' })
+    if (project.ownerId !== req.user.id) return res.status(403).json({ error: 'not your project' })
+
+    const updated = await projects.update(req.params.id, {
+      name: req.body.name === undefined ? undefined : String(req.body.name).slice(0, 120),
+      workspace: req.body.workspace ? readWorkspace(req.body) : undefined,
+    })
+    res.json({ project: projectView(updated) })
+  } catch (err) {
+    if (/required|limit|needs a name/.test(err.message)) return res.status(400).json({ error: err.message })
+    next(err)
+  }
+})
+
+app.delete('/api/projects/:id', requireUser, async (req, res, next) => {
+  try {
+    const project = await projects.byId(req.params.id)
+    if (!project) return res.status(404).json({ error: 'not found' })
+    if (project.ownerId !== req.user.id) return res.status(403).json({ error: 'not your project' })
+    await projects.remove(req.params.id)
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// --- shares: published links ----------------------------------------------
+
 app.post('/api/shares', requireUser, async (req, res, next) => {
   try {
     const share = await shares.create({
@@ -77,6 +154,7 @@ app.post('/api/shares', requireUser, async (req, res, next) => {
       previewHtml: typeof req.body.previewHtml === 'string' ? req.body.previewHtml : null,
       visibility: readVisibility(req.body.visibility),
       invites: readInvites(req.body.invites),
+      projectId: typeof req.body.projectId === 'string' ? req.body.projectId : null,
     })
     res.status(201).json({ share: ownerView(share) })
   } catch (err) {

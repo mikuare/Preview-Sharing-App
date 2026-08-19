@@ -29,6 +29,7 @@ export class SupabaseUnusable extends Error {}
 // other applications. These names must match supabase/schema.sql.
 const TABLE = {
   users: 'preview_users',
+  projects: 'preview_projects',
   shares: 'preview_shares',
   invites: 'preview_share_invites',
 }
@@ -87,6 +88,16 @@ async function run(context, thenable) {
   return result.data
 }
 
+const shapeProject = (row) =>
+  row && {
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    workspace: row.workspace,
+    createdAt: Date.parse(row.created_at),
+    updatedAt: Date.parse(row.updated_at),
+  }
+
 const shape = (row) =>
   row && {
     slug: row.slug,
@@ -94,6 +105,7 @@ const shape = (row) =>
     title: row.title,
     visibility: row.visibility,
     workspace: row.workspace,
+    projectId: row.project_id || null,
     previewHtml: row.preview_html,
     views: row.views,
     createdAt: Date.parse(row.created_at),
@@ -147,14 +159,53 @@ export const supabaseStore = {
     },
   },
 
+  projects: {
+    async create({ ownerId, name, workspace }) {
+      return run(
+        'create project',
+        db().from(TABLE.projects).insert({ owner_id: ownerId, name, workspace }).select().single()
+      ).then(shapeProject)
+    },
+
+    async update(id, { name, workspace }) {
+      const patch = { updated_at: new Date().toISOString() }
+      if (name !== undefined) patch.name = name
+      if (workspace !== undefined) patch.workspace = workspace
+      const rows = await run(
+        'update project',
+        db().from(TABLE.projects).update(patch).eq('id', id).select()
+      )
+      return rows[0] ? shapeProject(rows[0]) : null
+    },
+
+    async byId(id) {
+      const rows = await run('load project', db().from(TABLE.projects).select('*').eq('id', id).limit(1))
+      return rows[0] ? shapeProject(rows[0]) : null
+    },
+
+    async listByOwner(ownerId) {
+      const rows = await run(
+        'list projects',
+        db().from(TABLE.projects).select('*').eq('owner_id', ownerId).order('updated_at', { ascending: false })
+      )
+      return rows.map(shapeProject)
+    },
+
+    async remove(id) {
+      await run('delete project', db().from(TABLE.projects).delete().eq('id', id))
+      return true
+    },
+  },
+
   shares: {
-    async create({ ownerId, title, workspace, previewHtml, visibility, invites }) {
+    async create({ ownerId, title, workspace, previewHtml, visibility, invites, projectId }) {
       const slug = newSlug()
       await run(
         'create share',
         db().from(TABLE.shares).insert({
           slug,
           owner_id: ownerId,
+          project_id: projectId || null,
           title,
           visibility,
           workspace,

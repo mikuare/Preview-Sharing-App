@@ -4,7 +4,7 @@ import { copyText, download, encodeWorkspace, shareUrl } from '../lib/share.js'
 
 const kb = (n) => `${Math.round(n / 1024)} KB`
 
-export default function SharePanel({ workspace, previewHtml, entryName, onClose }) {
+export default function SharePanel({ workspace, previewHtml, entryName, projectId, onClose }) {
   const [link, setLink] = useState('')
   const [note, setNote] = useState('')
   const panelRef = useRef(null)
@@ -82,7 +82,7 @@ export default function SharePanel({ workspace, previewHtml, entryName, onClose 
         )}
       </div>
 
-      <HostedShare workspace={workspace} previewHtml={previewHtml} defaultTitle={`${base} preview`} />
+      <HostedShare workspace={workspace} previewHtml={previewHtml} projectId={projectId} defaultTitle={`${base} preview`} />
 
       {note && <div className="share-note">{note}</div>}
     </div>

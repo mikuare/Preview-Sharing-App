@@ -73,6 +73,14 @@ export const users = {
   byId: (id) => withStore((store) => store.users.byId(id)),
 }
 
+export const projects = {
+  create: (payload) => withStore((store) => store.projects.create(payload)),
+  update: (id, payload) => withStore((store) => store.projects.update(id, payload)),
+  byId: (id) => withStore((store) => store.projects.byId(id)),
+  listByOwner: (ownerId) => withStore((store) => store.projects.listByOwner(ownerId)),
+  remove: (id) => withStore((store) => store.projects.remove(id)),
+}
+
 export const shares = {
   create: (payload) => withStore((store) => store.shares.create(payload)),
   update: (slug, payload) => withStore((store) => store.shares.update(slug, payload)),

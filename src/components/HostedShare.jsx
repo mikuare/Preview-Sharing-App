@@ -18,7 +18,7 @@ const parseInvites = (text) =>
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.includes('@'))
 
-export default function HostedShare({ workspace, previewHtml, defaultTitle }) {
+export default function HostedShare({ workspace, previewHtml, projectId, defaultTitle }) {
   const [status, setStatus] = useState({ state: 'checking' })
   const [providers, setProviders] = useState([])
   const [mine, setMine] = useState([])
@@ -92,6 +92,7 @@ export default function HostedShare({ workspace, previewHtml, defaultTitle }) {
         previewHtml,
         visibility,
         invites: parseInvites(invites),
+        projectId,
       }
       const { share } = await createShare(payload)
       setCreated(share)
