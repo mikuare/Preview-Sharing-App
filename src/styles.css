@@ -64,8 +64,9 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 9px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.018em;
 }
 
 .brand .dot {
@@ -744,4 +745,9 @@ select.field { padding: 6px 8px; }
 .share-item-main:hover .share-item-title { color: var(--accent); }
 
 /* logo mark in the app header */
-.brand-mark { height: 20px; width: auto; display: block; }
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  display: block;
+  object-fit: contain;
+}
