@@ -44,7 +44,7 @@ export default function SignInGate({ providers }) {
     <div className="gate">
       <div className="gate-grid">
         <section className="gate-pitch">
-          <img className="gate-logo" src="/judech-mark.png" alt="JUDECH" width="132" />
+          <img className="gate-logo" src="/uniflex.png" alt="Uniflex" width="200" />
           <h1>
             Drop a component in.
             <br />
@@ -123,6 +123,20 @@ export default function SignInGate({ providers }) {
           </p>
         </section>
       </div>
+
+      <footer className="gate-footer">
+        <img className="gate-footer-mark" src="/U.png" alt="" width="22" height="22" />
+        <p className="gate-footer-line">
+          Powered by <strong>Uniflex</strong>
+          <span className="gate-footer-x" aria-hidden="true">×</span>
+          <strong>Digitalization Team</strong>
+        </p>
+        <span className="gate-footer-sep" aria-hidden="true" />
+        <p className="gate-footer-credit">
+          <span className="gate-footer-c" aria-hidden="true">&copy;</span>
+          <span className="sr-only">Copyright</span> Uniflex 2026
+        </p>
+      </footer>
     </div>
   )
 }
