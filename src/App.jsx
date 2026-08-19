@@ -438,7 +438,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="dot" />
+          <img className="brand-mark" src="/judech-mark.png" alt="" />
           Development Preview
           <small>live</small>
         </div>
