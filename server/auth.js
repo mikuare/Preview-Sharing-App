@@ -3,7 +3,7 @@
 
 import crypto from 'node:crypto'
 import { config } from './config.js'
-import { users } from './db.js'
+import { users } from './store/index.js'
 
 const SESSION_COOKIE = 'dp_session'
 const STATE_COOKIE = 'dp_oauth'
@@ -50,16 +50,21 @@ const cookieOptions = (maxAge) => ({
   maxAge,
 })
 
-export function currentUser(req) {
+export async function currentUser(req) {
   const session = verify(readCookies(req)[SESSION_COOKIE])
-  return session ? users.byId(session.uid) || null : null
+  if (!session) return null
+  return (await users.byId(session.uid)) || null
 }
 
-export function requireUser(req, res, next) {
-  const user = currentUser(req)
-  if (!user) return res.status(401).json({ error: 'sign-in required' })
-  req.user = user
-  next()
+export async function requireUser(req, res, next) {
+  try {
+    const user = await currentUser(req)
+    if (!user) return res.status(401).json({ error: 'sign-in required' })
+    req.user = user
+    next()
+  } catch (err) {
+    next(err)
+  }
 }
 
 export const publicUser = (user) =>
@@ -124,8 +129,12 @@ export function enabledProviders() {
 const safeReturn = (value) => (typeof value === 'string' && /^\/[^/\\]/.test(value) ? value : '/')
 
 export function mountAuth(app) {
-  app.get('/api/auth/providers', (req, res) => {
-    res.json({ providers: enabledProviders(), user: publicUser(currentUser(req)) })
+  app.get('/api/auth/providers', async (req, res, next) => {
+    try {
+      res.json({ providers: enabledProviders(), user: publicUser(await currentUser(req)) })
+    } catch (err) {
+      next(err)
+    }
   })
 
   app.get('/auth/:provider', (req, res) => {
@@ -175,9 +184,11 @@ export function mountAuth(app) {
       if (!profile.email) {
         throw new Error('That account has no verified email address, so it cannot be matched to an invite.')
       }
-      const user = users.upsert({ provider: key, ...profile })
+      const user = await users.upsert({ provider: key, ...profile })
       res.cookie(SESSION_COOKIE, sign({ uid: user.id }, SESSION_TTL), cookieOptions(SESSION_TTL))
-      res.redirect(state.returnTo || '/')
+      // appOrigin is the same host in production; locally it points back at the
+      // Vite dev server rather than this API port.
+      res.redirect(`${config.appOrigin}${state.returnTo || '/'}`)
     } catch (err) {
       res.status(502).send(`Sign-in with ${provider.label} failed: ${err.message}`)
     }
@@ -185,13 +196,17 @@ export function mountAuth(app) {
 
   // Local testing only: skips the provider round-trip so the share flow can be
   // exercised without registering OAuth apps. Disabled unless ALLOW_DEV_LOGIN=1.
-  app.post('/auth/dev', (req, res) => {
+  app.post('/auth/dev', async (req, res, next) => {
     if (!config.allowDevLogin) return res.status(404).json({ error: 'dev sign-in is disabled' })
     const email = String(req.body?.email || '').trim().toLowerCase()
     if (!email) return res.status(400).json({ error: 'email required' })
-    const user = users.upsert({ provider: 'dev', providerId: email, email, name: email.split('@')[0], avatar: null })
-    res.cookie(SESSION_COOKIE, sign({ uid: user.id }, SESSION_TTL), cookieOptions(SESSION_TTL))
-    res.json({ user: publicUser(user) })
+    try {
+      const user = await users.upsert({ provider: 'dev', providerId: email, email, name: email.split('@')[0], avatar: null })
+      res.cookie(SESSION_COOKIE, sign({ uid: user.id }, SESSION_TTL), cookieOptions(SESSION_TTL))
+      res.json({ user: publicUser(user) })
+    } catch (err) {
+      next(err)
+    }
   })
 
   app.post('/auth/logout', (req, res) => {

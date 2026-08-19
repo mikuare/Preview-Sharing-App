@@ -124,7 +124,19 @@ export default function HostedShare({ workspace, previewHtml, defaultTitle }) {
       <div className="share-title">Hosted link</div>
       <p>
         Saved on your share server as a short link. Signed in as <strong>{status.user.email}</strong>.
+        {status.config?.storage && (
+          <>
+            {' '}Storage: <strong>{status.config.storage.active}</strong>.
+          </>
+        )}
       </p>
+
+      {status.config?.storage?.degraded && (
+        <p className="share-warn">
+          Supabase is unreachable, so links created now are saved to this machine only — they will not
+          open for anyone else until the database is back.
+        </p>
+      )}
 
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
 

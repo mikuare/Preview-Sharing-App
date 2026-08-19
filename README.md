@@ -89,14 +89,17 @@ it is refused whenever `NODE_ENV=production` and should never be set on a deploy
 
 #### How the server is put together
 
-`server/` is Express + SQLite (`data/shares.db`), roughly 500 lines:
-
 | File | Role |
 | --- | --- |
-| `server/config.js` | Environment, provider availability, boot-time warnings |
+| `server/config.js` | Environment, provider availability, serverless detection, boot-time warnings |
 | `server/auth.js` | OAuth 2.0 authorization-code flow for both providers, HMAC-signed session cookies |
-| `server/db.js` | Schema, share CRUD, invite list, the access decision |
-| `server/index.js` | Share API, validation and limits, serves the built app and `/s/:slug` |
+| `server/store/index.js` | Chooses the storage backend and handles a Supabase outage |
+| `server/store/supabase.js` | Supabase Postgres over PostgREST — the production backend |
+| `server/store/sqlite.js` | Local SQLite file — development, and the offline fallback |
+| `server/store/shared.js` | Slugs, email normalisation, the one access rule |
+| `server/app.js` | The Express app: share API, validation and limits |
+| `server/index.js` | Local entry point — starts the app listening on `PORT` |
+| `api/index.js` | Vercel entry point — mounts the same app as a serverless function |
 
 Sessions are `HttpOnly`, `SameSite=Lax` cookies signed with `SESSION_SECRET` and verified in
 constant time; `Secure` switches on automatically when `BASE_URL` is https. OAuth callbacks are
@@ -104,11 +107,95 @@ checked against a signed state cookie. Workspaces are capped (`MAX_WORKSPACE_BYT
 default), and shared preview HTML is only ever rendered inside a sandboxed iframe — never as a
 top-level document on the server's origin.
 
-#### Deploying
+#### Storage
 
-Any host that runs Node and keeps a disk will do (Fly.io, Railway, Render, a VPS). Build first,
-set `BASE_URL` to the public URL, register that URL in both OAuth apps, and run `npm start`.
-Keep `data/` on a persistent volume — that is where the shares live.
+Shares live in **Supabase Postgres** whenever `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
+set, and in a local **SQLite** file otherwise. Both backends implement the same interface, so
+public/invite visibility, invite matching and owner permissions behave identically on either.
+
+Every database object this app owns is prefixed `preview_`, so the project can be shared with
+other applications without collisions.
+
+Schema changes are **CLI migrations**, in `supabase/migrations/`.
+
+The Supabase CLI is deliberately *not* a dependency of this project: its platform binary cannot be
+unpacked under `/mnt/c` on WSL, and it has no place in a Vercel build. Install it once, outside the
+Windows filesystem:
+
+```bash
+curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz \
+  | tar -xz -C ~/.local/bin supabase && chmod +x ~/.local/bin/supabase
+supabase --version
+```
+
+Then, one-time setup:
+
+```bash
+supabase login                 # opens a browser for an access token
+npm run db:link                # supabase link --project-ref <your project ref>
+npm run db:status              # compare local migrations with the remote history
+npm run db:push                # apply anything not yet applied
+npm run db:verify              # confirm the objects exist and the key can use them
+```
+
+`supabase/preflight.sql` is a separate read-only script for the SQL editor: it reports whether any
+of the names the migration wants are already taken, and creates nothing.
+
+The migration creates `preview_users`, `preview_shares`, `preview_share_invites`,
+`preview_increment_share_views()`, and turns **RLS on with no policies** — the anon key can read
+nothing even if it leaks, because only the service role (this server) ever touches those tables.
+
+Two things to know when the project is shared with another app:
+
+- `supabase db push` writes to `supabase_migrations.schema_migrations`, the project-wide migration
+  history. If the other app has migrations that are not in this repo, `npm run db:status` will show
+  them as remote-only; run `supabase db pull` to bring them in, or
+  `supabase migration repair --status applied <version>` to record them, before pushing.
+- The CLI needs a database password when linking. It never goes in `.env`, and the app itself does
+  not use it — the server only ever talks to PostgREST with the service role key.
+
+Access goes through PostgREST over HTTPS rather than a Postgres connection: a serverless function
+that opens a pooled TCP connection per invocation is a good way to exhaust a database. Only
+`@supabase/postgrest-js` is used — the full `supabase-js` client eagerly builds a Realtime
+WebSocket this app never needs (and that needs a polyfill on Node 20).
+
+**If Supabase is unreachable**, a server with a real disk falls back to the local SQLite file,
+keeps working, and reports itself as degraded — in the startup banner, in `/api/me`, and as a
+warning in the Share panel. Shares written while degraded are local-only until Supabase returns.
+On Vercel that fallback is off by default, because the container's filesystem disappears after the
+request: there the API answers `503` with a plain explanation instead of pretending to save.
+Override with `ALLOW_LOCAL_FALLBACK`.
+
+#### Deploying to Vercel
+
+The repo is Vercel-shaped already: `vite build` produces the static editor, `api/index.js` runs the
+Express app as one Node function, and `vercel.json` routes `/api/*` and `/auth/*` to it while
+`/s/*` falls through to the SPA.
+
+1. Push to GitHub and import the repo in Vercel (Vite preset; the build settings come from `vercel.json`).
+2. Create a Supabase project, then `npm run db:link && npm run db:push` to apply the migration.
+3. Add the environment variables below under **Project → Settings → Environment Variables**.
+4. Deploy, then add the deployment URL to both OAuth apps as a redirect/callback URL.
+
+| Variable | Value |
+| --- | --- |
+| `BASE_URL` | `https://your-app.vercel.app` |
+| `APP_ORIGIN` | the same URL |
+| `SESSION_SECRET` | a random secret — the server refuses to boot without it in production |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud Console |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth App |
+| `SUPABASE_URL` | `https://<project>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → `service_role` |
+
+Do **not** set `ALLOW_DEV_LOGIN` on Vercel; it is ignored there in any case. The Supabase anon key
+is not needed — the browser never talks to Supabase.
+
+Preview deployments get a different URL each time and neither Google nor GitHub accepts wildcard
+redirect URIs, so sign-in works on production and localhost out of the box; to use it on a preview
+URL, add that exact URL to the OAuth app and set `BASE_URL`/`APP_ORIGIN` for the preview
+environment.
+
+Any Node host with a disk (Fly, Railway, Render, a VPS) still works: `npm run build && npm start`.
 
 ## Notes
 

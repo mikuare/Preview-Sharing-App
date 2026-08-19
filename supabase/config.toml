@@ -1,0 +1,7 @@
+# Supabase CLI project config.
+#
+# `project_id` names the local stack; the remote project this repo pushes to is
+# recorded by `supabase link --project-ref <ref>` (stored in supabase/.temp,
+# which is gitignored). Everything else is left at CLI defaults on purpose, so
+# this file stays compatible across CLI versions.
+project_id = "development-preview"
