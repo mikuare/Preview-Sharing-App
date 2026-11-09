@@ -755,3 +755,50 @@ select.field { padding: 6px 8px; }
   display: block;
   object-fit: contain;
 }
+
+/* ---------- upload / project notices ---------- */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 14px 10px;
+  padding: 8px 6px 8px 10px;
+  border: 1px solid #24406b;
+  border-radius: 8px;
+  background: #101a2b;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.notice span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notice.warn { border-color: #453419; background: #2a2011; color: var(--warn); }
+.notice .btn { flex: none; }
+
+/* ---------- project menu ---------- */
+.popover-head .count {
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.project-tools { display: flex; align-items: center; gap: 8px; padding-top: 10px; }
+.project-tools .field { flex: 1; min-width: 0; font-family: inherit; font-size: 12px; }
+.project-menu .share-item { padding: 6px 4px; }
+.open-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #16324f;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.share-item.confirm { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; background: #1e1417; border-radius: 8px; }
+.confirm-text { font-size: 12px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.btn.danger-solid { background: #b4232c; border-color: #b4232c; color: #fff; font-weight: 600; }
+.btn.danger-solid:hover { background: #cf2f39; border-color: #cf2f39; }

@@ -57,14 +57,26 @@ project holds its files, entry point, installed packages and React version, so r
 the editor back exactly where you left it. Projects are private to their owner: another account
 gets `403`, and a signed-out request gets `401`.
 
+What an upload does depends on what is already open:
+
+| Upload | Result |
+| --- | --- |
+| Into an empty editor | Becomes a new project, named after its entry file. |
+| Files with the same names as open ones | Replaces them in the open project. |
+| Files that import, or are imported by, open ones (or a lone stylesheet) | Joins the open project. |
+| A separate component | Opens as **its own project** and previews right away; the previous project stays saved. |
+
+**New project** in the header starts a blank one without touching the current project. Deleting a
+project asks for confirmation in the menu, and any share links made from it keep working. Opening a
+project never re-saves it, so the list stays ordered by real edits.
+
 **Share** in the header offers two ways out of this machine:
 
 - **Standalone HTML file** — the built preview as one self-contained page. Send it to anyone;
   they open the file and it renders. No install, no server, no account. It pulls React and any
   installed packages from esm.sh at runtime, so the viewer needs internet.
 - **Workspace link** — files, entry point and installed packages gzipped into the URL hash.
-  Opens in any running copy of Development Preview, editable on the other end. The Tailwind
-  dashboard sample packs to a ~2.4k-character link.
+  Opens in any running copy of Development Preview, editable on the other end.
 
 Neither of those needs a backend.
 
@@ -213,7 +225,8 @@ Any Node host with a disk (Fly, Railway, Render, a VPS) still works: `npm run bu
 
 - Package versions default to `latest` from the npm registry; edit the version field on
   any installed package to pin it.
-- The workspace (files, entry, installed packages) is saved to `localStorage`.
-- `?sample=dashboard&install=tailwindcss,lucide-react,xlsx` deep-links a demo state.
+- Signed in, the workspace is saved to your projects on the server. Only without a share server
+  (local only) is it kept in `localStorage` instead.
+- `?install=tailwindcss,lucide-react,xlsx` installs packages into whatever project opens.
 - The dev server uses a polling file watcher: this project lives on the Windows
   filesystem under WSL, where inotify events never fire.

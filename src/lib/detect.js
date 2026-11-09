@@ -83,24 +83,46 @@ const TW_UTILITY =
   /(?:^|[\s"'`])(?:(?:sm|md|lg|xl|2xl|hover|focus|active|group-hover|dark|first|last|odd|even)):?[a-z[-]|(?:^|[\s"'`])(?:bg|text|border|rounded|shadow|flex|grid|gap|space-[xy]|items|justify|self|content|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|w|h|min-w|min-h|max-w|max-h|font|leading|tracking|opacity|z|top|left|right|bottom|inset|ring|divide|transition|duration|ease|animate|cursor|overflow|object|col-span|row-span|order|basis|grow|shrink|aspect|backdrop|blur|from|via|to|placeholder|outline|underline|uppercase|truncate|sr-only|container|absolute|relative|fixed|sticky|block|inline-block|inline-flex|hidden)(?:-[a-z0-9./[\]#%-]+)?(?=[\s"'`]|$)/g
 
 const TW_KEYWORDS = /tailwind|@apply|@tailwind/i
+const CLASS_ATTR = /(?:className|class)\s*=\s*(?:"[^"]*"|'[^']*'|\{`[^`]*`\})/g
+// `.name` in a selector position — in a .css file or a CSS string inside a component.
+const CSS_CLASS_SELECTOR = /\.(-?[A-Za-z_][\w-]*)(?=\s*[{,:.[>+~)]|\s+[.#\w[*>+~])/g
+
+/** Class names the project styles itself, so they are not evidence of Tailwind. */
+function ownClassNames(files) {
+  const own = new Set()
+  for (const file of files) {
+    const text = file.content.replace(CLASS_ATTR, '')
+    CSS_CLASS_SELECTOR.lastIndex = 0
+    let m
+    while ((m = CSS_CLASS_SELECTOR.exec(text))) own.add(m[1])
+  }
+  return own
+}
 
 /**
  * Heuristic: does this project's markup look like it was designed with Tailwind?
  * Returns { likely, hits, reason }.
+ *
+ * Names such as `block`, `m-row` or `w-140` look like utilities but are just as common in
+ * hand-written CSS, so a class only counts when the project does not define it itself.
  */
 export function detectTailwind(files) {
   let hits = 0
+  let styled = 0
   let keyword = false
+  const own = ownClassNames(files)
   for (const file of files) {
     if (TW_KEYWORDS.test(file.content)) keyword = true
-    const classAttrs = file.content.match(/(?:className|class)\s*=\s*(?:"[^"]*"|'[^']*'|\{`[^`]*`\})/g) || []
+    const classAttrs = file.content.match(CLASS_ATTR) || []
     for (const attr of classAttrs) {
       TW_UTILITY.lastIndex = 0
-      const m = attr.match(TW_UTILITY)
-      if (m) hits += m.length
+      for (const match of attr.match(TW_UTILITY) || []) {
+        if (own.has(match.trim().replace(/^["'`]/, ''))) styled += 1
+        else hits += 1
+      }
     }
   }
-  const likely = keyword || hits >= 6
+  const likely = keyword || (hits >= 6 && hits >= styled)
   return {
     likely,
     hits,

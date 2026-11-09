@@ -9,6 +9,7 @@ import { collectDependencies, detectTailwind, pickEntry } from './lib/detect.js'
 import { buildBundle, ensureCompiler } from './lib/compile.js'
 import { buildPreviewHtml } from './lib/buildPreview.js'
 import { DEFAULT_REACT_VERSION, REACT_VERSIONS, SPECIAL, resolvePackage } from './lib/registry.js'
+import { classifyUpload, entryAfterMerge, mergeFiles, nameFromEntry, normalizeWorkspace } from './lib/workspace.js'
 import SharePanel from './components/SharePanel.jsx'
 import SignInGate from './components/SignInGate.jsx'
 import ProjectMenu from './components/ProjectMenu.jsx'
@@ -23,10 +24,10 @@ import {
   serverStatus,
   signOut,
 } from './lib/api.js'
-import { SAMPLES } from './samples/index.js'
 
 const STORAGE_KEY = 'dev-preview:workspace:v1'
 
+/** Browser-only copy of the workspace — used only when no share server is reachable. */
 function loadWorkspace() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -39,13 +40,14 @@ function loadWorkspace() {
 }
 
 export default function App() {
-  const saved = useMemo(loadWorkspace, [])
-
-  const [files, setFiles] = useState(saved?.files ?? [])
-  const [entryName, setEntryName] = useState(saved?.entryName ?? null)
-  const [activeFile, setActiveFile] = useState(saved?.files?.[0]?.name ?? null)
-  const [installed, setInstalled] = useState(saved?.installed ?? [])
-  const [reactVersion, setReactVersion] = useState(saved?.reactVersion ?? DEFAULT_REACT_VERSION)
+  // The editor starts empty. A signed-in user's project comes from the server, and an
+  // offline editor restores its browser copy during startup. Showing a stale local copy
+  // first would run the previous files' preview — and could save them as a duplicate.
+  const [files, setFiles] = useState([])
+  const [entryName, setEntryName] = useState(null)
+  const [activeFile, setActiveFile] = useState(null)
+  const [installed, setInstalled] = useState([])
+  const [reactVersion, setReactVersion] = useState(DEFAULT_REACT_VERSION)
 
   const [busy, setBusy] = useState([])
   const [depErrors, setDepErrors] = useState({})
@@ -56,6 +58,7 @@ export default function App() {
   const [compileErrors, setCompileErrors] = useState([])
   const [missingDeps, setMissingDeps] = useState([])
   const [messages, setMessages] = useState([])
+  const [notice, setNotice] = useState(null) // { text, tone: 'info' | 'warn' }
 
   const [autoRun, setAutoRun] = useState(true)
   const [device, setDevice] = useState('full')
@@ -71,23 +74,42 @@ export default function App() {
   const [projectId, setProjectId] = useState(null)
   const [projectName, setProjectName] = useState('Untitled project')
   const [projectsOpen, setProjectsOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] = useState(0) // saves in flight
 
+  const workspace = useMemo(() => ({ files, entryName, installed, reactVersion }), [files, entryName, installed, reactVersion])
   const dependencies = useMemo(() => collectDependencies(files), [files])
   const tailwind = useMemo(() => detectTailwind(files), [files])
 
-  // ---- persistence ---------------------------------------------------------
+  // Async work (saves, uploads, project loads) reads the latest values through refs so a
+  // callback created a few renders ago never acts on an older workspace.
+  const wsRef = useRef(workspace)
+  wsRef.current = workspace
+  const sessionRef = useRef(session.state)
+  sessionRef.current = session.state
+  const nameRef = useRef(projectName)
+  nameRef.current = projectName
+
+  const say = useCallback((text, tone = 'info') => setNotice({ text, tone }), [])
 
   useEffect(() => {
+    if (!notice) return undefined
+    const id = setTimeout(() => setNotice(null), notice.tone === 'warn' ? 12000 : 8000)
+    return () => clearTimeout(id)
+  }, [notice])
+
+  // ---- browser-only persistence (no share server) --------------------------
+
+  useEffect(() => {
+    if (session.state !== 'offline') return undefined
     const id = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ files, entryName, installed, reactVersion }))
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace))
       } catch {
         /* quota — the workspace just won't be restored next time */
       }
     }, 400)
     return () => clearTimeout(id)
-  }, [files, entryName, installed, reactVersion, dependencies])
+  }, [workspace, session.state])
 
   // ---- messages from the preview iframe -----------------------------------
 
@@ -110,107 +132,7 @@ export default function App() {
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  // ---- files ---------------------------------------------------------------
-
-  const addFiles = useCallback((incoming) => {
-    if (!incoming.length) return
-    setFiles((prev) => {
-      const next = [...prev]
-      for (const file of incoming) {
-        const at = next.findIndex((f) => f.name === file.name)
-        if (at >= 0) next[at] = file
-        else next.push(file)
-      }
-      const entry = pickEntry(next)
-      setEntryName((current) => (current && next.some((f) => f.name === current) ? current : entry?.name ?? null))
-      setActiveFile(incoming[0].name)
-      return next
-    })
-  }, [])
-
-  const removeFile = useCallback((name) => {
-    setFiles((prev) => {
-      const next = prev.filter((f) => f.name !== name)
-      setEntryName((current) => (current === name ? pickEntry(next)?.name ?? null : current))
-      setActiveFile((current) => (current === name ? next[0]?.name ?? null : current))
-      if (!next.length) {
-        setHtml(null)
-        setStatus({ state: 'idle' })
-        setCompileErrors([])
-        setMissingDeps([])
-      }
-      return next
-    })
-  }, [])
-
-  const updateActive = useCallback(
-    (content) => {
-      setFiles((prev) =>
-        prev.map((f) => (f.name === activeFile ? { ...f, content, size: content.length } : f))
-      )
-    },
-    [activeFile]
-  )
-
-  const loadSample = (sample) => {
-    setFiles(sample.files)
-    setEntryName(sample.entry)
-    setActiveFile(sample.files[0].name)
-    setMessages([])
-  }
-
-  const newProject = () => {
-    setProjectId(null)
-    setProjectName('Untitled project')
-    setFiles([])
-    setEntryName(null)
-    setActiveFile(null)
-    setInstalled([])
-    setHtml(null)
-    setMessages([])
-    setCompileErrors([])
-    setMissingDeps([])
-    setStatus({ state: 'idle' })
-    setProjectsOpen(false)
-  }
-
-  const renameProject = async (id, name) => {
-    await saveProject(id, { name })
-    if (id === projectId) setProjectName(name)
-    refreshProjects()
-  }
-
-  const removeProject = async (id) => {
-    await deleteProject(id)
-    const list = await refreshProjects()
-    if (id === projectId) {
-      if (list.length) await openProject(list[0].id)
-      else newProject()
-    }
-  }
-
-  const clearAll = () => {
-    setFiles([])
-    setEntryName(null)
-    setActiveFile(null)
-    setHtml(null)
-    setMessages([])
-    setCompileErrors([])
-    setMissingDeps([])
-    setStatus({ state: 'idle' })
-  }
-
-  // ---- deep links: ?sample=dashboard&install=tailwindcss,xlsx --------------
-
-  const bootstrapped = useRef(false)
-
-  const applyWorkspace = useCallback((workspace) => {
-    setFiles(workspace.files || [])
-    setEntryName(workspace.entryName ?? workspace.files?.[0]?.name ?? null)
-    setActiveFile(workspace.files?.[0]?.name ?? null)
-    setInstalled(workspace.installed ?? [])
-    setReactVersion(workspace.reactVersion || DEFAULT_REACT_VERSION)
-  }, [])
+  // ---- saving ----------------------------------------------------------------
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -222,17 +144,207 @@ export default function App() {
     }
   }, [])
 
-  const openProject = useCallback(
-    async (id) => {
-      const { project, workspace } = await loadProject(id)
-      setProjectId(project.id)
-      setProjectName(project.name)
-      applyWorkspace(workspace)
-      setProjectsOpen(false)
-      setMessages([])
+  // The project the open workspace saves into. Every switch replaces this object rather
+  // than editing it, so a save that finishes late still lands in the project it was
+  // started for. `sig` is the last workspace known to be on the server; `queue` keeps one
+  // project's saves in order (and stops a slow first save from creating the project twice).
+  const binding = useRef({ id: null, sig: '', deleted: false, queue: null })
+
+  const saveInto = useCallback(
+    async (target, ws) => {
+      if (target.deleted) return
+      if (!target.id && !ws.files.length) return // nothing worth creating a project for
+      const sig = JSON.stringify(ws)
+      if (target.id && target.sig === sig) return // unchanged — no write, no reordering
+      setSaving((n) => n + 1)
+      try {
+        if (target.id) {
+          await saveProject(target.id, { workspace: ws })
+        } else {
+          const { project } = await createProject(nameFromEntry(ws.entryName), ws)
+          target.id = project.id
+          if (binding.current === target) {
+            setProjectId(project.id)
+            setProjectName(project.name)
+          }
+        }
+        target.sig = sig
+        refreshProjects()
+      } catch (err) {
+        if (!target.deleted) say(`Could not save the project: ${err.message}`, 'warn')
+      } finally {
+        setSaving((n) => n - 1)
+      }
     },
-    [applyWorkspace]
+    [refreshProjects, say]
   )
+
+  const persist = useCallback(
+    (target, ws) => {
+      target.queue = (target.queue || Promise.resolve()).then(() => saveInto(target, ws))
+      return target.queue
+    },
+    [saveInto]
+  )
+
+  useEffect(() => {
+    if (session.state !== 'ready') return undefined
+    const target = binding.current
+    const id = setTimeout(() => persist(target, workspace), 1200)
+    return () => clearTimeout(id)
+  }, [workspace, session.state, persist])
+
+  // ---- switching what is open ------------------------------------------------
+
+  const resetPreview = useCallback(() => {
+    setHtml(null)
+    setStatus({ state: 'idle' })
+    setCompileErrors([])
+    setMissingDeps([])
+    setMessages([])
+    setDepErrors({})
+  }, [])
+
+  /**
+   * Every switch goes through here: save what is open (the autosave debounce would drop the
+   * last second of edits), bind to the next project, and show it with a clean preview —
+   * never the previous project's frame, errors or console.
+   */
+  const switchTo = useCallback(
+    (project, ws, { closeMenu = true } = {}) => {
+      if (sessionRef.current === 'ready') persist(binding.current, wsRef.current)
+      binding.current = { id: project?.id ?? null, sig: project ? JSON.stringify(ws) : '', deleted: false, queue: null }
+      setProjectId(project?.id ?? null)
+      setProjectName(project?.name ?? nameFromEntry(ws.entryName))
+      setFiles(ws.files)
+      setEntryName(ws.entryName)
+      setActiveFile(ws.entryName ?? ws.files[0]?.name ?? null)
+      setInstalled(ws.installed)
+      setReactVersion(ws.reactVersion)
+      resetPreview()
+      if (closeMenu) setProjectsOpen(false)
+    },
+    [persist, resetPreview]
+  )
+
+  // Bumped by every switch, so a project that finishes loading after a later click is dropped.
+  const openTicket = useRef(0)
+
+  const openProject = useCallback(
+    async (id, options) => {
+      if (id === binding.current.id) {
+        if (!options || options.closeMenu !== false) setProjectsOpen(false)
+        return
+      }
+      const ticket = ++openTicket.current
+      try {
+        const { project, workspace: saved } = await loadProject(id)
+        if (ticket !== openTicket.current) return
+        switchTo(project, normalizeWorkspace(saved, DEFAULT_REACT_VERSION), options)
+      } catch (err) {
+        if (ticket === openTicket.current) say(`Could not open that project: ${err.message}`, 'warn')
+      }
+    },
+    [switchTo, say]
+  )
+
+  const newProject = useCallback(
+    (options) => {
+      openTicket.current += 1
+      switchTo(null, { files: [], entryName: null, installed: [], reactVersion: wsRef.current.reactVersion }, options)
+    },
+    [switchTo]
+  )
+
+  const renameProject = async (id, name) => {
+    try {
+      await saveProject(id, { name })
+      if (id === binding.current.id) setProjectName(name)
+      refreshProjects()
+    } catch (err) {
+      say(`Could not rename the project: ${err.message}`, 'warn')
+    }
+  }
+
+  const removeProject = async (id) => {
+    const target = binding.current
+    const isOpen = id === target.id
+    if (isOpen) target.deleted = true // nothing may save into it any more
+    try {
+      await deleteProject(id)
+    } catch (err) {
+      target.deleted = false
+      say(`Could not delete the project: ${err.message}`, 'warn')
+      return
+    }
+    const list = await refreshProjects()
+    if (isOpen && binding.current === target) {
+      // Keep the menu open so several projects can be cleaned up in a row.
+      if (list.length) await openProject(list[0].id, { closeMenu: false })
+      else newProject({ closeMenu: false })
+    }
+  }
+
+  // ---- files ---------------------------------------------------------------
+
+  const addFiles = useCallback(
+    (incoming) => {
+      if (!incoming.length) return
+      const current = wsRef.current
+      const kind = classifyUpload(current.files, incoming)
+
+      // A separate component dropped onto an open project gets a project of its own, so
+      // the preview shows what was just uploaded and the earlier work stays as it was.
+      if (kind === 'unrelated' && sessionRef.current === 'ready') {
+        const previous = nameRef.current
+        openTicket.current += 1
+        const ws = normalizeWorkspace({ files: incoming, reactVersion: current.reactVersion }, DEFAULT_REACT_VERSION)
+        switchTo(null, ws)
+        say(`Opened ${nameFromEntry(ws.entryName)} as a new project. "${previous}" is still saved under your projects.`)
+        return
+      }
+
+      const next = mergeFiles(current.files, incoming)
+      // Without projects (offline) the upload still joins this workspace, but the preview
+      // moves to the file that was just dropped.
+      const entry =
+        kind === 'unrelated'
+          ? pickEntry(incoming)?.name ?? entryAfterMerge(next, current.entryName)
+          : entryAfterMerge(next, current.entryName)
+      setFiles(next)
+      setEntryName(entry)
+      setActiveFile(incoming.some((f) => f.name === entry) ? entry : incoming[0].name)
+      if (kind === 'fresh' && !binding.current.id) setProjectName(nameFromEntry(entry))
+      if (kind === 'unrelated') say(`Now previewing ${entry}. Use the entry button on a file to switch back.`)
+    },
+    [switchTo, say]
+  )
+
+  const removeFile = useCallback(
+    (name) => {
+      const current = wsRef.current
+      const next = current.files.filter((f) => f.name !== name)
+      setFiles(next)
+      setEntryName(current.entryName === name ? pickEntry(next)?.name ?? null : current.entryName)
+      setActiveFile((prev) => (prev === name ? next[0]?.name ?? null : prev))
+      if (!next.length) resetPreview()
+    },
+    [resetPreview]
+  )
+
+  const updateActive = useCallback(
+    (content) => {
+      setFiles((prev) =>
+        prev.map((f) => (f.name === activeFile ? { ...f, content, size: content.length } : f))
+      )
+    },
+    [activeFile]
+  )
+
+  // ---- startup: session, then the right project ------------------------------
+  // Deep link: ?install=tailwindcss,xlsx installs packages into whatever opens.
+
+  const bootstrapped = useRef(false)
 
   useEffect(() => {
     if (bootstrapped.current) return
@@ -243,7 +355,7 @@ export default function App() {
       if (!me) {
         // No share server: keep working, browser-only.
         const saved = loadWorkspace()
-        if (saved) applyWorkspace(saved)
+        if (saved) switchTo(null, normalizeWorkspace(saved, DEFAULT_REACT_VERSION))
         setSession({ state: 'offline', user: null, providers: [], config: null })
         return
       }
@@ -260,60 +372,35 @@ export default function App() {
         return
       }
 
-      setSession({ state: 'ready', user: me.user, providers, config: me.config })
+      // The editor stays on the loading screen until the project is open, so nothing can be
+      // dropped into (or autosaved from) a workspace that is about to be replaced.
+      try {
+        const params = new URLSearchParams(window.location.search)
+        const shared = await workspaceFromLocation()
+        const list = await refreshProjects()
 
-      const params = new URLSearchParams(window.location.search)
-      const shared = await workspaceFromLocation()
-      const list = await refreshProjects()
+        if (shared && Array.isArray(shared.files) && shared.files.length) {
+          // Arrived on a workspace link: keep it as a project of their own.
+          const { project } = await createProject('Shared copy', shared)
+          history.replaceState(null, '', location.pathname)
+          refreshProjects()
+          await openProject(project.id)
+        } else if (list.length) {
+          await openProject(list[0].id)
+        }
 
-      if (shared && Array.isArray(shared.files) && shared.files.length) {
-        // Arrived on a workspace link: keep it as a project of their own.
-        const { project } = await createProject('Shared copy', shared)
-        history.replaceState(null, '', location.pathname)
-        await openProject(project.id)
-      } else if (params.get('sample')) {
-        const sample = SAMPLES.find((s) => s.id === params.get('sample'))
-        if (sample) loadSample(sample)
-      } else if (list.length) {
-        await openProject(list[0].id)
+        const wanted = (params.get('install') || '').split(',').map((n) => n.trim()).filter(Boolean)
+        for (const name of wanted) installRef.current(name)
+      } catch (err) {
+        say(`Could not load your projects: ${err.message}`, 'warn')
+      } finally {
+        setSession({ state: 'ready', user: me.user, providers, config: me.config })
       }
-
-      const wanted = (params.get('install') || '').split(',').map((n) => n.trim()).filter(Boolean)
-      for (const name of wanted) installRef.current(name)
     })().catch((err) => {
       console.error('startup failed:', err)
       setSession((prev) => ({ ...prev, state: prev.state === 'loading' ? 'offline' : prev.state }))
     })
-  }, [applyWorkspace, openProject, refreshProjects])
-
-  // ---- autosave ------------------------------------------------------------
-
-  const saveState = useRef({ id: null, name: 'Untitled project' })
-  saveState.current = { id: projectId, name: projectName }
-
-  useEffect(() => {
-    if (session.state !== 'ready' || !files.length) return
-    const timer = setTimeout(async () => {
-      const workspace = { files, entryName, installed, reactVersion }
-      setSaving(true)
-      try {
-        if (saveState.current.id) {
-          await saveProject(saveState.current.id, { workspace })
-        } else {
-          const name = entryName ? entryName.split('/').pop().replace(/\.[^.]+$/, '') : 'Untitled project'
-          const { project } = await createProject(name, workspace)
-          setProjectId(project.id)
-          setProjectName(project.name)
-        }
-        await refreshProjects()
-      } catch (err) {
-        setMessages((prev) => [...prev, { level: 'warn', text: `Could not save project: ${err.message}` }])
-      } finally {
-        setSaving(false)
-      }
-    }, 1200)
-    return () => clearTimeout(timer)
-  }, [files, entryName, installed, reactVersion, session.state, refreshProjects])
+  }, [switchTo, openProject, refreshProjects, say])
 
   // ---- install / uninstall -------------------------------------------------
 
@@ -395,7 +482,7 @@ export default function App() {
   runRef.current = run
 
   useEffect(() => {
-    if (!autoRun || !files.length) return
+    if (!autoRun || !files.length) return undefined
     const id = setTimeout(() => runRef.current(), 500)
     return () => clearTimeout(id)
   }, [autoRun, files, installed, reactVersion, entryName])
@@ -403,7 +490,7 @@ export default function App() {
   // A preview that never reports back is usually a package that failed to load
   // from the CDN — say so rather than spinning forever.
   useEffect(() => {
-    if (status.state !== 'building' || !html) return
+    if (status.state !== 'building' || !html) return undefined
     const id = setTimeout(() => {
       setMessages((prev) => [
         ...prev,
@@ -419,6 +506,7 @@ export default function App() {
   }, [status.state, html, runKey])
 
   const active = files.find((f) => f.name === activeFile) || null
+  const signedIn = session.state === 'ready'
 
   if (session.state === 'loading') {
     return (
@@ -443,18 +531,22 @@ export default function App() {
           <small>live</small>
         </div>
 
-        {session.state === 'ready' && (
+        {signedIn && (
           <div className="popover-anchor">
-            <button className={`btn tiny${projectsOpen ? ' primary' : ''}`} onClick={() => setProjectsOpen((v) => !v)}>
+            <button
+              className={`btn tiny${projectsOpen ? ' primary' : ''}`}
+              title="Open, rename or delete your projects"
+              onClick={() => setProjectsOpen((v) => !v)}
+            >
               {projectName} {saving ? '·' : ''} ▾
             </button>
             {projectsOpen && (
               <ProjectMenu
                 projects={projects}
                 currentId={projectId}
-                saving={saving}
+                saving={saving > 0}
                 onOpen={openProject}
-                onCreate={newProject}
+                onCreate={() => newProject()}
                 onRename={renameProject}
                 onDelete={removeProject}
                 onClose={() => setProjectsOpen(false)}
@@ -488,23 +580,23 @@ export default function App() {
           {shareOpen && (
             <SharePanel
               projectId={projectId}
-              workspace={{ files, entryName, installed, reactVersion }}
+              workspace={workspace}
               previewHtml={html}
               entryName={entryName}
               onClose={() => setShareOpen(false)}
             />
           )}
         </div>
-        {SAMPLES.map((s) => (
-          <button key={s.id} className="btn tiny" title={s.hint} onClick={() => loadSample(s)}>
-            {s.label}
-          </button>
-        ))}
-        <button className="btn tiny ghost danger" onClick={clearAll} disabled={!files.length}>
-          Clear
+        <button
+          className="btn tiny"
+          onClick={() => newProject()}
+          disabled={!files.length}
+          title={signedIn ? 'Start a blank project. This one stays saved under your projects.' : 'Clear the workspace'}
+        >
+          {signedIn ? 'New project' : 'Clear'}
         </button>
 
-        {session.state === 'ready' ? (
+        {signedIn ? (
           <>
             <span className="share-meta account-email" title={session.user.email}>{session.user.email}</span>
             <button className="btn tiny ghost" onClick={() => signOut().then(() => location.reload())}>
@@ -526,6 +618,14 @@ export default function App() {
               <span className="count">{files.length}</span>
             </div>
             <Dropzone onFiles={addFiles} />
+            {notice && (
+              <div className={`notice ${notice.tone}`} role="status">
+                <span>{notice.text}</span>
+                <button className="btn tiny ghost" aria-label="Dismiss" onClick={() => setNotice(null)}>
+                  ✕
+                </button>
+              </div>
+            )}
             <div className="section-body" style={{ paddingTop: 0 }}>
               <FileList
                 files={files}
