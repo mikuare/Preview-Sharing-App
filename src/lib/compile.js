@@ -151,7 +151,9 @@ export function buildBundle(files, entryName) {
           token: tokenOf.get(entryFile.name),
           selfMounting: mountsItself(entryFile.content),
           hasDefault: /export\s+default/.test(entryFile.content),
-          namedExport: namedComponentExport(entryFile.content),
+          // Only a fallback: with a default export the runtime must mount that, not
+          // whichever wrapper (e.g. `export function AdminOnly`) happens to come first.
+          namedExport: /export\s+default/.test(entryFile.content) ? null : namedComponentExport(entryFile.content),
         }
       : null,
   }

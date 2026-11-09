@@ -316,7 +316,11 @@ select.field { padding: 6px 8px; }
   transition: max-width 0.2s ease;
 }
 
-.frame iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+/* The editor chrome is dark (`color-scheme: dark` on :root), and an iframe's
+   prefers-color-scheme follows its embedding element. Without this, components
+   with an "auto" theme render dark here even when the OS is in light mode.
+   `light dark` hands the preview the viewer's real OS preference, as a normal tab gets. */
+.frame iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; color-scheme: light dark; }
 
 .stage-empty {
   align-self: center;
