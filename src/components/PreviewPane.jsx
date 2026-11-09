@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { PREVIEW_ALLOW, PREVIEW_SANDBOX, previewColorScheme, standalonePage } from '../lib/buildPreview.js'
+import { fileCount, timeAgo } from '../lib/format.js'
 
 const WIDTHS = [
   { id: 'full', label: 'Full', px: null },
@@ -6,7 +8,11 @@ const WIDTHS = [
   { id: 'phone', label: 'Phone', px: 390 },
 ]
 
-const SANDBOX = 'allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads'
+const THEMES = [
+  { id: 'system', label: 'Auto', title: 'Follow this device’s light/dark setting, like a normal browser tab' },
+  { id: 'light', label: 'Light', title: 'Always preview in light mode' },
+  { id: 'dark', label: 'Dark', title: 'Always preview in dark mode' },
+]
 
 export default function PreviewPane({
   html,
@@ -15,6 +21,9 @@ export default function PreviewPane({
   compileErrors,
   device,
   onDevice,
+  theme = 'system',
+  onTheme,
+  title = 'Preview',
   autoRun,
   onToggleAuto,
   onRun,
@@ -22,19 +31,20 @@ export default function PreviewPane({
   missingDeps = [],
   onInstallMissing,
   tailwindHint,
+  recent = [],
+  onOpenProject,
 }) {
-  const frameRef = useRef(null)
   const blobRef = useRef(null)
   const [notice, setNotice] = useState('')
 
   useEffect(() => () => blobRef.current && URL.revokeObjectURL(blobRef.current), [])
 
-  // Opens the built preview as its own page. The blob URL has to outlive the
-  // click long enough for the new tab to load it.
+  // Opens the built preview as its own tab, still inside a sandboxed frame and in the
+  // project's theme. The blob URL has to outlive the click long enough for the tab to load.
   const openStandalone = () => {
     if (!html) return
     if (blobRef.current) URL.revokeObjectURL(blobRef.current)
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+    const url = URL.createObjectURL(new Blob([standalonePage(html, { title, theme })], { type: 'text/html' }))
     blobRef.current = url
     const tab = window.open(url, '_blank')
     if (!tab || tab.closed) {
@@ -54,10 +64,23 @@ export default function PreviewPane({
         <label className="status" style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRun} onChange={onToggleAuto} /> auto
         </label>
-        <div className="segmented">
+        <div className="segmented" role="group" aria-label="Preview width">
           {WIDTHS.map((w) => (
             <button key={w.id} className={w.id === device ? 'on' : ''} onClick={() => onDevice(w.id)}>
               {w.label}
+            </button>
+          ))}
+        </div>
+        <div className="segmented" role="group" aria-label="Preview theme">
+          {THEMES.map((t) => (
+            <button
+              key={t.id}
+              className={t.id === theme ? 'on' : ''}
+              title={t.title}
+              aria-pressed={t.id === theme}
+              onClick={() => onTheme?.(t.id)}
+            >
+              {t.label}
             </button>
           ))}
         </div>
@@ -69,7 +92,9 @@ export default function PreviewPane({
           {status.state === 'blocked' && <span className="badge pending">needs packages</span>}
           {status.state === 'idle' && 'idle'}
         </span>
-        <button className="btn tiny ghost" onClick={openStandalone} disabled={!html}>Open ↗</button>
+        <button className="btn tiny ghost" onClick={openStandalone} disabled={!html} title="Open this preview in its own tab">
+          Open ↗
+        </button>
       </div>
 
       {notice && (
@@ -113,6 +138,19 @@ export default function PreviewPane({
             <h2>Nothing loaded yet</h2>
             Drop a component file on the left — say <code>react.jsx</code> — and it renders here.
             Imports it needs (Tailwind, xlsx, charts…) appear in the dependency list, ready to install.
+            {recent.length > 0 && onOpenProject && (
+              <div className="recent">
+                <div className="recent-head">Or preview a previous project</div>
+                {recent.map((project) => (
+                  <button key={project.id} className="recent-item" onClick={() => onOpenProject(project.id)}>
+                    <span className="recent-name">{project.name}</span>
+                    <span className="share-meta">
+                      {fileCount(project.fileCount)} · {timeAgo(project.updatedAt)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : !html ? (
           <div className="stage-empty">
@@ -123,9 +161,10 @@ export default function PreviewPane({
           <div className="frame" style={{ maxWidth: width.px ? `${width.px}px` : '100%' }}>
             <iframe
               key={runKey}
-              ref={frameRef}
               title="preview"
-              sandbox={SANDBOX}
+              sandbox={PREVIEW_SANDBOX}
+              allow={PREVIEW_ALLOW}
+              style={{ colorScheme: previewColorScheme(theme) }}
               srcDoc={html}
             />
           </div>

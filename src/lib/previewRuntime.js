@@ -100,6 +100,34 @@ function report(title, error) {
 window.process = window.process || { env: { NODE_ENV: 'development' }, platform: 'browser', version: '' }
 window.global = window.global || window
 
+// The preview is sandboxed without a real origin, so touching localStorage or
+// sessionStorage throws a SecurityError. Components that remember a theme, a signed-in
+// role or a draft would crash on load; an in-memory stand-in keeps their flow working
+// for as long as this preview runs.
+;['localStorage', 'sessionStorage'].forEach(function (area) {
+  try {
+    window[area].setItem('__dp_probe__', '1')
+    window[area].removeItem('__dp_probe__')
+    return // real storage works (e.g. opened from a file) — leave it alone
+  } catch (_) {
+    /* blocked: fall through to the stand-in */
+  }
+  const data = new Map()
+  const store = {
+    getItem: function (key) { key = String(key); return data.has(key) ? data.get(key) : null },
+    setItem: function (key, value) { data.set(String(key), String(value)) },
+    removeItem: function (key) { data.delete(String(key)) },
+    clear: function () { data.clear() },
+    key: function (index) { const keys = Array.from(data.keys()); return index in keys ? keys[index] : null },
+    get length() { return data.size },
+  }
+  try {
+    Object.defineProperty(window, area, { value: store, configurable: true })
+  } catch (_) {
+    /* leave the original in place */
+  }
+})
+
 // --- module graph -----------------------------------------------------------
 
 const urlByToken = new Map()

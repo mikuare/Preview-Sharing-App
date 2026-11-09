@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { authProviders, devSignIn, loadShare, signInUrl, signOut } from './lib/api.js'
 import { buildBundle, ensureCompiler } from './lib/compile.js'
-import { buildPreviewHtml } from './lib/buildPreview.js'
+import { PREVIEW_ALLOW, PREVIEW_SANDBOX, buildPreviewHtml, previewColorScheme } from './lib/buildPreview.js'
 import { encodeWorkspace } from './lib/share.js'
-
-const SANDBOX = 'allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads'
 
 function SignInCard({ title, message, providers, children }) {
   return (
@@ -189,7 +187,13 @@ export default function Viewer({ slug }) {
           </div>
         ) : html ? (
           <div className="frame">
-            <iframe title={share.title} sandbox={SANDBOX} srcDoc={html} />
+            <iframe
+              title={share.title}
+              sandbox={PREVIEW_SANDBOX}
+              allow={PREVIEW_ALLOW}
+              style={{ colorScheme: previewColorScheme(share.workspace?.previewTheme) }}
+              srcDoc={html}
+            />
           </div>
         ) : (
           <div className="viewer-card"><span className="spin" /> Building preview…</div>

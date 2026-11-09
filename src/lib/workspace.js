@@ -70,6 +70,13 @@ export function nameFromEntry(entryName) {
 }
 
 /**
+ * Preview color scheme, saved with the project so it opens the way it was designed:
+ * 'system' follows the viewer's device (like a normal tab); 'light' / 'dark' pin it.
+ */
+export const PREVIEW_THEMES = ['system', 'light', 'dark']
+export const readTheme = (value) => (PREVIEW_THEMES.includes(value) ? value : 'system')
+
+/**
  * The exact shape autosave compares and stores. Keeping one shape (and key order) means a
  * project that was just opened compares equal to itself and is not re-saved.
  */
@@ -82,5 +89,6 @@ export function normalizeWorkspace(workspace, fallbackReact) {
     entryName,
     installed: Array.isArray(workspace?.installed) ? workspace.installed : [],
     reactVersion: workspace?.reactVersion || fallbackReact,
+    previewTheme: readTheme(workspace?.previewTheme),
   }
 }

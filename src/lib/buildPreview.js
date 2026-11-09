@@ -5,6 +5,43 @@ import runtimeSource from './previewRuntime.js?raw'
 import { importMapEntries, reactImportMap, tailwindScriptUrl, SPECIAL } from './registry.js'
 
 const escapeForScript = (text) => text.replace(/</g, '\\u003c')
+const escapeAttr = (text) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+const escapeText = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+
+// Every place a preview runs uses the same frame: scripts on, but no access to this
+// app's origin (no allow-same-origin), so uploaded code cannot reach the signed-in session.
+export const PREVIEW_SANDBOX =
+  'allow-scripts allow-modals allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads'
+export const PREVIEW_ALLOW = 'clipboard-write'
+
+/**
+ * A frame's prefers-color-scheme follows the color-scheme of its <iframe> element, so this
+ * is how a preview is shown in light, dark, or the device's own setting.
+ */
+export const previewColorScheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : 'light dark')
+
+/**
+ * The preview as a page of its own — Open ↗ and the downloaded file. The built document
+ * runs inside a sandboxed frame rather than directly on this app's origin, and the frame
+ * carries the project's theme, so it looks the same as in the editor.
+ */
+export function standalonePage(html, { title = 'Preview', theme = 'system' } = {}) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeText(title)}</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+  iframe { display: block; width: 100%; height: 100%; border: 0; color-scheme: ${previewColorScheme(theme)}; }
+</style>
+</head>
+<body>
+<iframe title="${escapeAttr(title)}" sandbox="${PREVIEW_SANDBOX}" allow="${PREVIEW_ALLOW}" srcdoc="${escapeAttr(html)}"></iframe>
+</body>
+</html>`
+}
 
 const BASE_CSS = `
   *, *::before, *::after { box-sizing: border-box; }

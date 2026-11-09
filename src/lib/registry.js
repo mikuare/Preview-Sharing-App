@@ -5,8 +5,11 @@
 const REGISTRY = 'https://registry.npmjs.org'
 const CDN = 'https://esm.sh'
 
-export const DEFAULT_REACT_VERSION = '18.3.1'
-export const REACT_VERSIONS = ['18.3.1', '19.1.0']
+// New projects start on the newest React. 18.3.1 stays available (and is picked
+// automatically) for code that uses APIs React 19 removed, such as ReactDOM.render.
+export const DEFAULT_REACT_VERSION = '19.3.1'
+export const LEGACY_REACT_VERSION = '18.3.1'
+export const REACT_VERSIONS = ['19.3.1', '19.2.9', '18.3.1']
 
 /** Packages the preview provides as a runtime service instead of an import. */
 export const SPECIAL = {

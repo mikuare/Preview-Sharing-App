@@ -802,3 +802,36 @@ select.field { padding: 6px 8px; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .btn.danger-solid { background: #b4232c; border-color: #b4232c; color: #fff; font-weight: 600; }
 .btn.danger-solid:hover { background: #cf2f39; border-color: #cf2f39; }
+
+/* ---------- preview bar: two segmented groups (width + theme) ---------- */
+.preview-bar { overflow-x: auto; scrollbar-width: none; }
+.preview-bar > :not(.spacer) { flex: none; }
+.preview-bar .segmented button { white-space: nowrap; }
+
+/* ---------- empty stage: previous projects ---------- */
+.recent { margin-top: 18px; text-align: left; }
+.recent-head {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.recent-item {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.recent-item + .recent-item { margin-top: 6px; }
+.recent-item:hover { border-color: #2e3446; background: var(--panel-2); }
+.recent-item:hover .recent-name { color: var(--accent); }
+.recent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

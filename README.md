@@ -30,8 +30,11 @@ Nothing is written to disk and there is no bundler step at runtime:
 | Preview | `src/lib/buildPreview.js` assembles a standalone HTML document — import map, styles, modules, loader — that runs in a sandboxed iframe. |
 
 The preview iframe is sandboxed without `allow-same-origin`, so uploaded code cannot
-reach this app's storage. Console output and errors are posted back to the host and
-shown in the console panel.
+reach this app's storage or session — that holds for **Open ↗** too, which runs the preview
+inside the same kind of frame in its own tab. Console output and errors are posted back to the
+host and shown in the console panel. Because the sandbox has no real `localStorage` /
+`sessionStorage`, the preview supplies in-memory stand-ins, so components that save a theme,
+role or draft keep working (the values last until the preview re-runs).
 
 ## What it handles
 
@@ -41,8 +44,15 @@ shown in the console panel.
 - A `tailwind.config.js` in the upload is applied to the Tailwind v3 runtime
 - Entry point detection (a file that mounts itself, or `main`/`index`/`App`, or the
   file nobody imports); override it with the **entry** button on any file
-- React 18 or 19, switchable in the header — every installed package is pinned to the
-  same React instance via `?external=react`
+- React 19.3.1 (latest) by default, with 19.2.9 and 18.3.1 switchable in the header — every
+  installed package is pinned to the same React instance via `?external=react`. Code that uses
+  APIs React 19 removed (`ReactDOM.render`, string refs, `defaultProps`, legacy context…) is
+  detected on upload and previewed on 18.3.1 automatically. A project keeps the version it was
+  saved with.
+- **Auto / Light / Dark** in the preview bar sets the preview's color scheme. Auto follows the
+  device like a normal browser tab; Light or Dark pins it. The choice is saved with the project
+  and carries over to Open ↗, the downloaded file and hosted share links, so a design opens in
+  the theme it was made for.
 
 ## Sharing
 

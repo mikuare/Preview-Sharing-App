@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import HostedShare from './HostedShare.jsx'
 import { copyText, download, encodeWorkspace, shareUrl } from '../lib/share.js'
+import { standalonePage } from '../lib/buildPreview.js'
 
 const kb = (n) => `${Math.round(n / 1024)} KB`
 
@@ -34,6 +35,11 @@ export default function SharePanel({ workspace, previewHtml, entryName, projectI
 
   const base = (entryName || 'preview').split('/').pop().replace(/\.[^.]+$/, '')
   const tooLong = link.length > 8000
+  // A pinned light/dark theme travels in a wrapper frame (a page cannot force its own
+  // prefers-color-scheme). With Auto the file is the plain preview, as before.
+  const theme = workspace.previewTheme || 'system'
+  const fileHtml = () =>
+    theme === 'system' ? previewHtml : standalonePage(previewHtml, { title: `${base} preview`, theme })
 
   return (
     <div className="popover" ref={panelRef}>
@@ -49,7 +55,7 @@ export default function SharePanel({ workspace, previewHtml, entryName, projectI
           className="btn tiny primary"
           disabled={!previewHtml}
           onClick={() => {
-            download(`${base}-preview.html`, previewHtml)
+            download(`${base}-preview.html`, fileHtml())
             setNote('Downloaded — send that file to anyone.')
           }}
         >

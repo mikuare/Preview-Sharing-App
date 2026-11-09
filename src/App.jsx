@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dropzone from './components/Dropzone.jsx'
 import FileList from './components/FileList.jsx'
 import DependencyPanel from './components/DependencyPanel.jsx'
 import PreviewPane from './components/PreviewPane.jsx'
 import ConsolePanel from './components/ConsolePanel.jsx'
 import CodeEditor from './components/CodeEditor.jsx'
-import { collectDependencies, detectTailwind, pickEntry } from './lib/detect.js'
+import { collectDependencies, detectTailwind, legacyReactApis, pickEntry } from './lib/detect.js'
 import { buildBundle, ensureCompiler } from './lib/compile.js'
 import { buildPreviewHtml } from './lib/buildPreview.js'
-import { DEFAULT_REACT_VERSION, REACT_VERSIONS, SPECIAL, resolvePackage } from './lib/registry.js'
-import { classifyUpload, entryAfterMerge, mergeFiles, nameFromEntry, normalizeWorkspace } from './lib/workspace.js'
-import SharePanel from './components/SharePanel.jsx'
-import SignInGate from './components/SignInGate.jsx'
-import ProjectMenu from './components/ProjectMenu.jsx'
-import { workspaceFromLocation } from './lib/share.js'
+import { DEFAULT_REACT_VERSION, LEGACY_REACT_VERSION, REACT_VERSIONS, SPECIAL, resolvePackage } from './lib/registry.js'
+import {
+  classifyUpload,
+  entryAfterMerge,
+  mergeFiles,
+  nameFromEntry,
+  normalizeWorkspace,
+  readTheme,
+} from './lib/workspace.js'
 import {
   authProviders,
   createProject,
@@ -25,7 +28,25 @@ import {
   signOut,
 } from './lib/api.js'
 
+// Loaded only when first needed: the sign-in page (signed-out visitors), the project menu
+// and the share panel (on click — and prefetched on hover so the click feels instant).
+const loadSignInGate = () => import('./components/SignInGate.jsx')
+const loadProjectMenu = () => import('./components/ProjectMenu.jsx')
+const loadSharePanel = () => import('./components/SharePanel.jsx')
+const SignInGate = lazy(loadSignInGate)
+const ProjectMenu = lazy(loadProjectMenu)
+const SharePanel = lazy(loadSharePanel)
+
 const STORAGE_KEY = 'dev-preview:workspace:v1'
+const isReact19 = (version) => Number(String(version).split('.')[0]) >= 19
+
+const LoadingGate = () => (
+  <div className="gate">
+    <div className="gate-card" style={{ textAlign: 'center' }}>
+      <span className="spin" /> Loading…
+    </div>
+  </div>
+)
 
 /** Browser-only copy of the workspace — used only when no share server is reachable. */
 function loadWorkspace() {
@@ -48,6 +69,7 @@ export default function App() {
   const [activeFile, setActiveFile] = useState(null)
   const [installed, setInstalled] = useState([])
   const [reactVersion, setReactVersion] = useState(DEFAULT_REACT_VERSION)
+  const [previewTheme, setPreviewTheme] = useState('system')
 
   const [busy, setBusy] = useState([])
   const [depErrors, setDepErrors] = useState({})
@@ -76,7 +98,10 @@ export default function App() {
   const [projectsOpen, setProjectsOpen] = useState(false)
   const [saving, setSaving] = useState(0) // saves in flight
 
-  const workspace = useMemo(() => ({ files, entryName, installed, reactVersion }), [files, entryName, installed, reactVersion])
+  const workspace = useMemo(
+    () => ({ files, entryName, installed, reactVersion, previewTheme }),
+    [files, entryName, installed, reactVersion, previewTheme]
+  )
   const dependencies = useMemo(() => collectDependencies(files), [files])
   const tailwind = useMemo(() => detectTailwind(files), [files])
 
@@ -153,7 +178,9 @@ export default function App() {
   const saveInto = useCallback(
     async (target, ws) => {
       if (target.deleted) return
-      if (!target.id && !ws.files.length) return // nothing worth creating a project for
+      // The server rejects an empty workspace, and an empty one is not worth creating a
+      // project for; the last saved files stay until something new is added.
+      if (!ws.files.length) return
       const sig = JSON.stringify(ws)
       if (target.id && target.sig === sig) return // unchanged — no write, no reordering
       setSaving((n) => n + 1)
@@ -221,6 +248,7 @@ export default function App() {
       setActiveFile(ws.entryName ?? ws.files[0]?.name ?? null)
       setInstalled(ws.installed)
       setReactVersion(ws.reactVersion)
+      setPreviewTheme(readTheme(ws.previewTheme))
       resetPreview()
       if (closeMenu) setProjectsOpen(false)
     },
@@ -251,7 +279,11 @@ export default function App() {
   const newProject = useCallback(
     (options) => {
       openTicket.current += 1
-      switchTo(null, { files: [], entryName: null, installed: [], reactVersion: wsRef.current.reactVersion }, options)
+      switchTo(
+        null,
+        { files: [], entryName: null, installed: [], reactVersion: DEFAULT_REACT_VERSION, previewTheme: 'system' },
+        options
+      )
     },
     [switchTo]
   )
@@ -293,14 +325,26 @@ export default function App() {
       const current = wsRef.current
       const kind = classifyUpload(current.files, incoming)
 
+      // Code written for React 18 (ReactDOM.render and friends) cannot run on 19, so it
+      // previews on 18 rather than failing on the newer default.
+      const legacy = legacyReactApis(incoming)
+      const legacyNote = legacy.length
+        ? `This code uses ${legacy.join(', ')}, which React 19 removed, so it previews on React ${LEGACY_REACT_VERSION}.`
+        : ''
+
       // A separate component dropped onto an open project gets a project of its own, so
       // the preview shows what was just uploaded and the earlier work stays as it was.
       if (kind === 'unrelated' && sessionRef.current === 'ready') {
         const previous = nameRef.current
         openTicket.current += 1
-        const ws = normalizeWorkspace({ files: incoming, reactVersion: current.reactVersion }, DEFAULT_REACT_VERSION)
+        const ws = normalizeWorkspace(
+          { files: incoming, reactVersion: legacy.length ? LEGACY_REACT_VERSION : DEFAULT_REACT_VERSION },
+          DEFAULT_REACT_VERSION
+        )
         switchTo(null, ws)
-        say(`Opened ${nameFromEntry(ws.entryName)} as a new project. "${previous}" is still saved under your projects.`)
+        say(
+          `Opened ${nameFromEntry(ws.entryName)} as a new project. "${previous}" is still saved under your projects. ${legacyNote}`.trim()
+        )
         return
       }
 
@@ -315,7 +359,15 @@ export default function App() {
       setEntryName(entry)
       setActiveFile(incoming.some((f) => f.name === entry) ? entry : incoming[0].name)
       if (kind === 'fresh' && !binding.current.id) setProjectName(nameFromEntry(entry))
-      if (kind === 'unrelated') say(`Now previewing ${entry}. Use the entry button on a file to switch back.`)
+      const downgrade = legacy.length > 0 && isReact19(current.reactVersion)
+      if (downgrade) setReactVersion(LEGACY_REACT_VERSION)
+      const message = [
+        kind === 'unrelated' ? `Now previewing ${entry}. Use the entry button on a file to switch back.` : '',
+        downgrade ? legacyNote : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+      if (message) say(message)
     },
     [switchTo, say]
   )
@@ -376,7 +428,10 @@ export default function App() {
       // dropped into (or autosaved from) a workspace that is about to be replaced.
       try {
         const params = new URLSearchParams(window.location.search)
-        const shared = await workspaceFromLocation()
+        // The link decoder is only fetched when the URL actually carries a workspace.
+        const shared = /#project=/.test(location.hash)
+          ? await import('./lib/share.js').then((m) => m.workspaceFromLocation())
+          : null
         const list = await refreshProjects()
 
         if (shared && Array.isArray(shared.files) && shared.files.length) {
@@ -507,19 +562,18 @@ export default function App() {
 
   const active = files.find((f) => f.name === activeFile) || null
   const signedIn = session.state === 'ready'
+  // A project saved on a version that is no longer offered still shows (and keeps) it.
+  const reactOptions = REACT_VERSIONS.includes(reactVersion) ? REACT_VERSIONS : [...REACT_VERSIONS, reactVersion]
+  const recent = useMemo(() => projects.filter((p) => p.id !== projectId).slice(0, 5), [projects, projectId])
 
-  if (session.state === 'loading') {
-    return (
-      <div className="gate">
-        <div className="gate-card" style={{ textAlign: 'center' }}>
-          <span className="spin" /> Loading…
-        </div>
-      </div>
-    )
-  }
+  if (session.state === 'loading') return <LoadingGate />
 
   if (session.state === 'anonymous') {
-    return <SignInGate providers={session.providers} />
+    return (
+      <Suspense fallback={<LoadingGate />}>
+        <SignInGate providers={session.providers} />
+      </Suspense>
+    )
   }
 
   return (
@@ -536,21 +590,25 @@ export default function App() {
             <button
               className={`btn tiny${projectsOpen ? ' primary' : ''}`}
               title="Open, rename or delete your projects"
+              onPointerEnter={loadProjectMenu}
+              onFocus={loadProjectMenu}
               onClick={() => setProjectsOpen((v) => !v)}
             >
               {projectName} {saving ? '·' : ''} ▾
             </button>
             {projectsOpen && (
-              <ProjectMenu
-                projects={projects}
-                currentId={projectId}
-                saving={saving > 0}
-                onOpen={openProject}
-                onCreate={() => newProject()}
-                onRename={renameProject}
-                onDelete={removeProject}
-                onClose={() => setProjectsOpen(false)}
-              />
+              <Suspense fallback={null}>
+                <ProjectMenu
+                  projects={projects}
+                  currentId={projectId}
+                  saving={saving > 0}
+                  onOpen={openProject}
+                  onCreate={() => newProject()}
+                  onRename={renameProject}
+                  onDelete={removeProject}
+                  onClose={() => setProjectsOpen(false)}
+                />
+              </Suspense>
             )}
           </div>
         )}
@@ -559,9 +617,18 @@ export default function App() {
 
         <label className="status" style={{ color: 'var(--muted)', fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
           React
-          <select className="field" style={{ width: 'auto' }} value={reactVersion} onChange={(e) => setReactVersion(e.target.value)}>
-            {REACT_VERSIONS.map((v) => (
-              <option key={v} value={v}>{v}</option>
+          <select
+            className="field"
+            style={{ width: 'auto' }}
+            value={reactVersion}
+            title="React version the preview runs on"
+            onChange={(e) => setReactVersion(e.target.value)}
+          >
+            {reactOptions.map((v) => (
+              <option key={v} value={v}>
+                {v}
+                {v === DEFAULT_REACT_VERSION ? ' (latest)' : ''}
+              </option>
             ))}
           </select>
         </label>
@@ -573,18 +640,22 @@ export default function App() {
           <button
             className={`btn tiny${shareOpen ? ' primary' : ''}`}
             disabled={!files.length}
+            onPointerEnter={loadSharePanel}
+            onFocus={loadSharePanel}
             onClick={() => setShareOpen((v) => !v)}
           >
             Share
           </button>
           {shareOpen && (
-            <SharePanel
-              projectId={projectId}
-              workspace={workspace}
-              previewHtml={html}
-              entryName={entryName}
-              onClose={() => setShareOpen(false)}
-            />
+            <Suspense fallback={null}>
+              <SharePanel
+                projectId={projectId}
+                workspace={workspace}
+                previewHtml={html}
+                entryName={entryName}
+                onClose={() => setShareOpen(false)}
+              />
+            </Suspense>
           )}
         </div>
         <button
@@ -668,6 +739,11 @@ export default function App() {
             tailwindHint={tailwind.likely && !installed.some((p) => p.name === 'tailwindcss')}
             device={device}
             onDevice={setDevice}
+            theme={previewTheme}
+            onTheme={setPreviewTheme}
+            title={projectName}
+            recent={signedIn ? recent : []}
+            onOpenProject={openProject}
             autoRun={autoRun}
             onToggleAuto={() => setAutoRun((v) => !v)}
             onRun={run}

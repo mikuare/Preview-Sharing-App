@@ -33,6 +33,8 @@ function readWorkspace(body) {
     entryName: typeof workspace.entryName === 'string' ? workspace.entryName : workspace.files[0].name,
     installed: Array.isArray(workspace.installed) ? workspace.installed : [],
     reactVersion: typeof workspace.reactVersion === 'string' ? workspace.reactVersion : '18.3.1',
+    // How the preview's color scheme is pinned; kept so projects and share links open as designed.
+    previewTheme: ['light', 'dark'].includes(workspace.previewTheme) ? workspace.previewTheme : 'system',
   }
   const bytes = Buffer.byteLength(JSON.stringify(clean))
   if (bytes > config.maxWorkspaceBytes) {

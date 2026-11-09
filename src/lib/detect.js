@@ -134,6 +134,32 @@ export function detectTailwind(files) {
   }
 }
 
+// --- React 18-only APIs -----------------------------------------------------
+
+// APIs React 19 removed. Code that uses them renders blank or throws on 19, so a
+// project containing them previews on React 18 instead.
+const LEGACY_REACT = [
+  [/\bReactDOM\.(?:render|hydrate)\s*\(/, 'ReactDOM.render'],
+  [/import\s*\{[^}]*\b(?:render|hydrate)\b[^}]*\}\s*from\s*['"]react-dom['"]/, 'render from react-dom'],
+  [/\b(?:unmountComponentAtNode|findDOMNode)\s*\(/, 'unmountComponentAtNode/findDOMNode'],
+  [/\bcreateFactory\s*\(/, 'React.createFactory'],
+  [/\b(?:childContextTypes|contextTypes)\s*=/, 'legacy context'],
+  [/\.defaultProps\s*=/, 'defaultProps'],
+  [/<[A-Za-z][\w.]*\s[^>]*?\bref=["']/, 'string refs'],
+  [/['"]react-dom\/test-utils['"]/, 'react-dom/test-utils'],
+]
+
+/** Names of React 18-only APIs used by the script files, e.g. ['ReactDOM.render']. */
+export function legacyReactApis(files) {
+  const found = new Set()
+  for (const file of files) {
+    if (!isScript(file.name)) continue
+    const code = stripComments(file.content)
+    for (const [re, label] of LEGACY_REACT) if (re.test(code)) found.add(label)
+  }
+  return [...found]
+}
+
 // --- Entry point detection --------------------------------------------------
 
 const ENTRY_PRIORITY = [/^(?:src\/)?main\.[jt]sx?$/i, /^(?:src\/)?index\.[jt]sx?$/i, /^(?:src\/)?app\.[jt]sx?$/i]

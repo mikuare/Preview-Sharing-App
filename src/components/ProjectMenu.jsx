@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-
-const when = (ms) => {
-  const mins = Math.round((Date.now() - ms) / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`
-  return `${Math.round(mins / 1440)}d ago`
-}
+import { fileCount, timeAgo } from '../lib/format.js'
 
 // Past this many projects the list gets a search box.
 const SEARCH_FROM = 6
@@ -134,7 +127,7 @@ export default function ProjectMenu({ projects, currentId, saving, onOpen, onCre
                       {isOpen && <span className="open-tag">open</span>}
                     </span>
                     <span className="share-meta">
-                      {project.fileCount} file{project.fileCount === 1 ? '' : 's'} · {when(project.updatedAt)}
+                      {fileCount(project.fileCount)} · {timeAgo(project.updatedAt)}
                     </span>
                   </button>
                   <button className="btn tiny ghost" title="Rename" aria-label={`Rename ${project.name}`} onClick={() => startRename(project)}>
